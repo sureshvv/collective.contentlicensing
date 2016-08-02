@@ -21,8 +21,15 @@ class CopyrightBylineView(BrowserView):
         if not copyright:
             copyright = self.props.DefaultSiteCopyright
         holder, license = self.clutil.getLicenseAndHolderFromObject(self.context)
+        holder_fullname = ''
         if '(site default)' == holder:
-            holder = self.props.DefaultSiteCopyrightHolder
+            holder = self.context.Creator()
+            mtool = self.context.portal_membership
+            mem = mtool.getMemberById(holder)
+            try:
+                holder_fullname = mem.getProperty('fullname')
+            except AttributeError:
+                holder = self.props.DefaultSiteCopyrightHolder
         if 'Site Default' == license[0]:
             license = self.props.DefaultSiteLicense
         license_name = license[1]
@@ -37,7 +44,7 @@ class CopyrightBylineView(BrowserView):
         if not license_button or 'None' == license_button:
             license_button = ''
 
-        return copyright, translate(holder.decode('utf-8','ignore'), domain="ContentLicensing", target_language=self.request.LANGUAGE), license_name, license_url, license_button
+        return copyright, translate(holder.decode('utf-8','ignore'), domain="ContentLicensing", target_language=self.request.LANGUAGE), license_name, license_url, license_button, holder_fullname
 
     def getAlertMsg(self):
         """Use this domain for translation"""
@@ -54,67 +61,63 @@ class CopyrightBylineView(BrowserView):
         title = self.context.title
 
         # Creators
-        creator = ''
-        index = 1
+        mtool = self.context.portal_membership
         
-        try:
-            names = [name.strip() for name in self.context.Creators()]
-        except AttributeError:
-            names = []
+        def get_fullname(mtool, memid):
+            mem = mtool.getMemberById(memid)
+            try:
+                fullname = mem.getProperty('fullname')
+            except AttributeError:
+                fullname = memid
+            return fullname
 
-        for cr in names:
-            if cr and '@' == cr[0]:
-                creator += '%s, ' %cr[1:]
-            else:
-                inits = ''
-                crs = []
-                crs = cr.split(' ')
-                for part in crs[:-1]:
-                    inits += ' ' + part[0] + '.'   
-                creator += crs[-1]
-                if inits:
-                    creator += "," + inits
-                creator += ', '
-                index += 1
-            
-        if creator:
-            creator = creator[:-2]
-            if creator:
-                if creator[-1] != '.':
-                    creator += '.'
+        creator = ', '.join([get_fullname(mtool, cr.strip()) \
+                                for cr in self.context.Creators()])
+        # if creator:
+        #     creator = creator + '.'
          
         portal_url = getToolByName(self.context, 'portal_url')
         portal_name = portal_url.getPortalObject().title
         plone_view = getMultiAdapter((self.context, self.request), name='plone')
-        create_date = plone_view.toLocalizedTime(self.context.creation_date)
+        create_date = plone_view.toLocalizedTime(self.context.EffectiveDate())
         url = self.context.absolute_url()
         date = plone_view.toLocalizedTime(DateTime())
+        loc = self.context.getLocation()
+        loc = re.sub(' [0-9]{5}, ', ' ', loc)
+        if self.context.getEXIF():
+            the_date = DateTime(self.context.getEXIFOrigDate()).fCommon()
+        else:
+            the_date = DateTime(self.context.getEffectiveDate()).fCommon()
+        the_date = the_date.split(' ')
+        the_date = the_date[:-2] + ['at'] + the_date[-2:]
+        the_date = ' '.join(the_date)
+        # the_date = plone_view.toLocalizedTime(DateTime())
+
         
         if creator:
             prompt_text = translate(
-                _(u"%s (%s). %s. Retrieved %s, from %s Web site: %s."),
+                _(u'"%s" by %s. note taken on %s %s. Retrieved %s from %s. See original for copyright and licensing information.'),
                 domain="ContentLicensing",
                 target_language=self.request.LANGUAGE,
             ) % (
-                safe_unicode(creator),
-                safe_unicode(create_date),
                 safe_unicode(title),
+                safe_unicode(creator),
+                safe_unicode(the_date),
+                safe_unicode(loc),
                 safe_unicode(date),
-                safe_unicode(portal_name),
                 safe_unicode(url)
             )
         else:
             prompt_text = translate(
-                _(u"%s. (%s). Retrieved %s, from %s Web site: %s."),
+                _(u'"%s" on %s %s. Retrieved %s from %s. See original for copyright and licensing information.'),
                 domain="ContentLicensing",
                 target_language=self.request.LANGUAGE,
             ) % (
                 safe_unicode(title),
-                safe_unicode(create_date),
+                safe_unicode(the_date),
+                safe_unicode(loc),
                 safe_unicode(date),
-                safe_unicode(portal_name),
                 safe_unicode(url)
             )
 
-        return prompt_text.replace('\'','\\\'').replace('\"','\\\'')
-
+        return prompt_text.replace('"','\\x22')
